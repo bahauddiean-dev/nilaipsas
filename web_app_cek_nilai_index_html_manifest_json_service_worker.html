@@ -1,0 +1,199 @@
+<!--
+Web App: Cek Nilai Siswa (PWA)
+Files included in this single document:
+  1) index.html        (main web app)
+  2) manifest.json     (PWA manifest)
+  3) service-worker.js (basic offline caching)
+
+INSTRUKSI SINGKAT:
+- Buat folder project, simpan file-file berikut dengan nama persis:
+    - index.html
+    - manifest.json
+    - service-worker.js
+- Ganti API_URL di index.html jika perlu (sudah diisi dengan link yang Anda kirim).
+- Deploy: cukup upload folder ini ke GitHub Pages / Netlify (drag & drop) atau hosting lain.
+
+Catatan: Jangan menyalin file manifest & service worker ke dalam <script> di HTML — mereka harus jadi file terpisah.
+-->
+
+<!-- ======================
+     1) index.html
+====================== -->
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Cek Nilai Siswa</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0ea5e9">
+
+  <style>
+    :root{--bg:#f6fbff;--card:#fff;--accent:#0ea5e9;--muted:#666}
+    *{box-sizing:border-box}
+    body{font-family:Inter,system-ui,Roboto,Arial,sans-serif;background:var(--bg);margin:0;padding:24px;color:#0b2540}
+    .wrap{max-width:520px;margin:24px auto}
+    .card{background:var(--card);border-radius:12px;padding:20px;box-shadow:0 6px 20px rgba(7,12,34,0.06)}
+    h1{margin:0 0 6px;font-size:20px}
+    p.lead{margin:0 0 18px;color:var(--muted)}
+    input,button{width:100%;padding:12px;border-radius:10px;border:1px solid #e6eef7;font-size:16px}
+    input:focus{outline:2px solid rgba(14,165,233,0.12);border-color:rgba(14,165,233,0.3)}
+    button{margin-top:12px;background:var(--accent);color:white;border:none;font-weight:600}
+    .result{margin-top:16px;padding:12px;border-radius:8px;background:#f1fbff}
+    .notfound{color:#b91c1c}
+    footer{margin-top:18px;text-align:center;color:var(--muted);font-size:13px}
+    .small{font-size:13px;color:var(--muted)}
+    .loader{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,0.35);border-top-color:rgba(255,255,255,0.9);border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Cek Nilai Siswa</h1>
+      <p class="lead">Masukkan nama lengkap (atau nama panggilan sesuai pada data), lalu tekan <b>Cek Nilai</b>.</p>
+
+      <label class="small" for="nama">Nama</label>
+      <input id="nama" placeholder="Contoh: Ahmad" autocomplete="name">
+      <button id="btn">Cek Nilai</button>
+
+      <div id="hasilArea"></div>
+
+      <p class="small">Data diambil dari Google Spreadsheet via API SheetBest. Jika nama tidak ditemukan, periksa ejaan.</p>
+    </div>
+    <footer>Siapkan link API: <code>https://api.sheetbest.com/sheets/7472cd77-6f84-40c5-ab59-1f06dce06e6a</code></footer>
+  </div>
+
+<script>
+// ======= CONFIG =======
+const API_URL = 'https://api.sheetbest.com/sheets/7472cd77-6f84-40c5-ab59-1f06dce06e6a';
+// Jika sheet Anda menggunakan kolom bernama 'Nama' dan 'Nilai', query ?Nama=NamaSiswa akan bekerja
+// Jika nama kolom berbeda, sesuaikan pada bagian pemrosesan JSON di bawah.
+
+// ======= UI refs =======
+const btn = document.getElementById('btn');
+const namaInput = document.getElementById('nama');
+const hasilArea = document.getElementById('hasilArea');
+
+btn.addEventListener('click', () => { cekNilai(); });
+namaInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') cekNilai(); });
+
+async function cekNilai() {
+  const nama = namaInput.value.trim();
+  hasilArea.innerHTML = '';
+  if (!nama) {
+    hasilArea.innerHTML = '<div class="result notfound">Masukkan nama terlebih dahulu.</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  const old = btn.innerHTML;
+  btn.innerHTML = '<span class="loader"></span> Sedang mencari...';
+
+  try {
+    const url = `${API_URL}?Nama=${encodeURIComponent(nama)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Gagal menghubungi API');
+    const data = await res.json();
+
+    // data biasanya array dari row yang cocok. Contoh: [{"Nama":"Andi","Nilai":"85"}, ...]
+    if (!Array.isArray(data) || data.length === 0) {
+      hasilArea.innerHTML = '<div class="result notfound">Nama tidak ditemukan.</div>';
+    } else {
+      // Jika ada lebih dari satu hasil, tampilkan yang pertama dan juga list (jika nama duplikat)
+      let html = '';
+      if (data.length === 1) {
+        const row = data[0];
+        // Pastikan nama kolom nilai adalah 'Nilai' atau sesuaikan di sini
+        const nilai = row.Nilai ?? row.nilai ?? row.score ?? Object.values(row)[1] ?? '—';
+        html += `<div class="result"><strong>${row.Nama ?? Object.values(row)[0]}</strong><br>Nilai: <b>${nilai}</b></div>`;
+      } else {
+        html += '<div class="result"><strong>Beberapa hasil ditemukan:</strong><ul>';
+        data.forEach(r => {
+          const nm = r.Nama ?? Object.values(r)[0];
+          const nilai = r.Nilai ?? r.nilai ?? r.score ?? Object.values(r)[1] ?? '—';
+          html += `<li>${nm} — <b>${nilai}</b></li>`;
+        });
+        html += '</ul></div>';
+      }
+      hasilArea.innerHTML = html;
+    }
+  } catch (err) {
+    console.error(err);
+    hasilArea.innerHTML = '<div class="result notfound">Terjadi kesalahan saat mengambil data. Coba lagi nanti.</div>';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = old;
+  }
+}
+
+// Register service worker (untuk PWA & caching)
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/service-worker.js')
+    .then(()=>{ console.log('SW terdaftar'); })
+    .catch(err=>{ console.warn('SW gagal terdaftar', err); });
+}
+</script>
+</body>
+</html>
+
+
+
+<!-- ======================
+     2) manifest.json
+====================== -->
+{
+  "short_name": "CekNilai",
+  "name": "Cek Nilai Siswa",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0ea5e9"
+}
+
+
+<!-- ======================
+     3) service-worker.js
+====================== -->
+// Basic service worker for offline caching
+const CACHE_NAME = 'cek-nilai-cache-v1';
+const FILES_TO_CACHE = [
+  '/',
+  '/index.html',
+  '/manifest.json',
+  // add icons if you include them
+  '/icons/icon-192.png',
+  '/icons/icon-512.png'
+];
+
+self.addEventListener('install', (evt) => {
+  evt.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(FILES_TO_CACHE);
+    })
+  );
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (evt) => {
+  evt.waitUntil(
+    caches.keys().then((keys) => Promise.all(
+      keys.map((key) => { if (key !== CACHE_NAME) return caches.delete(key); })
+    ))
+  );
+  self.clients.claim();
+});
+
+self.addEventListener('fetch', (evt) => {
+  evt.respondWith(
+    caches.match(evt.request).then((resp) => {
+      return resp || fetch(evt.request).catch(()=>caches.match('/'));
+    })
+  );
+});
